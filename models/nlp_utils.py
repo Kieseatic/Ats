@@ -1,31 +1,85 @@
 '''
-I am using Spacy to calculate the matching score through 
-looking out for matching skills, experience and qualifications 
+NLP utils with optional SpaCy support - falls back gracefully to sentence transformers only
 '''
-import spacy 
 import re 
 from sentence_transformers import SentenceTransformer, util
 
-#Loading spacy model for word embeddings 
-nlp = spacy.load("en_core_web_sm")
+# Try to import spacy, but handle gracefully if not available
+try:
+    import spacy
+    nlp = spacy.load("en_core_web_sm")
+    SPACY_AVAILABLE = True
+    print("SpaCy model loaded successfully")
+except (ImportError, IOError):
+    print("SpaCy not available, using sentence transformers only")
+    SPACY_AVAILABLE = False
 
-# Loading a sentence transformer model
-model = SentenceTransformer('all-MiniLM-L6-v2')  # I chose this one because it takes less space and is 5 times faster than other ones
+# Loading sentence transformer model for semantic similarity
+model = SentenceTransformer('all-MiniLM-L6-v2')
 
-print(spacy.__version__)
+def extract_skills_with_spacy(resume_text):
+    """Use SpaCy NER to extract potential skills and entities"""
+    if not SPACY_AVAILABLE:
+        return []
+    
+    doc = nlp(resume_text)
+    skills = []
+    
+    # Extract named entities that might be skills
+    for ent in doc.ents:
+        if ent.label_ in ["ORG", "PRODUCT", "LANGUAGE", "TECHNOLOGY"]:
+            skills.append(ent.text)
+    
+    # Extract noun phrases that might be skills
+    for chunk in doc.noun_chunks:
+        if len(chunk.text.split()) <= 3:  # Short phrases more likely to be skills
+            skills.append(chunk.text)
+    
+    return list(set(skills))
 
-# Skill matching using spaCy similarity
 def skill_similarity(skill, resume_text):
-    # Convert the strings into vectors
-    skill_token = nlp(skill)
-    resume_doc = nlp(resume_text)
-    max_similarity = 0
-
-    for token in resume_doc:
-        similarity = skill_token.similarity(token)
-        max_similarity = max(max_similarity, similarity)
-
-    return max_similarity > 0.75  # Industry-standard threshold
+    """
+    Enhanced skill matching using multiple approaches:
+    1. Exact/fuzzy matching for precision
+    2. Semantic similarity for broader matching
+    3. SpaCy NER if available
+    """
+    skill_lower = skill.lower()
+    resume_lower = resume_text.lower()
+    
+    # Method 1: Direct text matching (high precision)
+    if skill_lower in resume_lower:
+        return True
+    
+    # Method 2: Fuzzy matching for variations
+    skill_variations = [
+        skill_lower,
+        skill_lower.replace('.', ''),
+        skill_lower.replace(' ', ''),
+        skill_lower.replace('-', ''),
+    ]
+    
+    for variation in skill_variations:
+        if variation in resume_lower:
+            return True
+    
+    # Method 3: Semantic similarity using sentence transformers
+    skill_embedding = model.encode([skill_lower])
+    
+    # Check against extracted skills if SpaCy is available
+    if SPACY_AVAILABLE:
+        extracted_skills = extract_skills_with_spacy(resume_text)
+        for extracted_skill in extracted_skills:
+            extracted_embedding = model.encode([extracted_skill.lower()])
+            similarity = util.cos_sim(skill_embedding, extracted_embedding).item()
+            if similarity > 0.7:  # High threshold for extracted skills
+                return True
+    
+    # Check against entire resume text (lower threshold)
+    resume_embedding = model.encode([resume_text.lower()])
+    similarity = util.cos_sim(skill_embedding, resume_embedding).item()
+    
+    return similarity > 0.4  # Moderate threshold for full text
 
 def calculate_skill_score(job_skills, resume_text):
     matched_skills = []
