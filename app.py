@@ -9,7 +9,11 @@ from api.rag_integration import *
 from api import *
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://localhost:8080"])  # Allow SkillSphere to call this
+CORS(app, origins=[
+    "https://skillsphere-frontend-five.vercel.app",
+    "http://localhost:3000",  # For local development
+    "http://localhost:8080"   # For local development
+])
 
 # In-memory storage for job descriptions
 all_job_descriptions = []
