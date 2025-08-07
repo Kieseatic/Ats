@@ -21,11 +21,10 @@ CORS(app, origins=[
 ])
 # Load spaCy model for NLP-based parsing
 try:
-    import en_core_web_sm
-    nlp = en_core_web_sm.load()
-    print("✅ SpaCy NLP model loaded successfully (preinstalled)")
-except ImportError as e:
-    print("⚠️ SpaCy model not found. Add 'en-core-web-sm' to requirements.txt")
+    import spacy
+    nlp = spacy.load("en_core_web_sm")
+except (ImportError, OSError):
+    print("SpaCy model not available")
     nlp = None
 # In-memory storage for job descriptions
 all_job_descriptions = []
