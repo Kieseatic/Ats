@@ -1,5 +1,25 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
 
-# Backend
-venv
-backend/__pycache__/
-backend/.env
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Python-specific
+*.log
+*.sqlite3
+
+# Ignore dotenv
+.env
