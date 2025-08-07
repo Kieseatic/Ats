@@ -3,7 +3,6 @@ from flask_cors import CORS
 import json
 import re
 import os
-import spacy
 from datetime import datetime
 from dateutil import parser as date_parser
 import dateutil.parser
@@ -19,13 +18,10 @@ CORS(app, origins=[
     "http://localhost:3000",  # For local development
     "http://localhost:8080"   # For local development
 ])
-# Load spaCy model for NLP-based parsing
-try:
-    import spacy
-    nlp = spacy.load("en_core_web_sm")
-except (ImportError, OSError):
-    print("SpaCy model not available")
-    nlp = None
+
+# SpaCy disabled for deployment compatibility
+nlp = None
+print("⚠️ SpaCy disabled to avoid blis compilation issues during deployment")
 # In-memory storage for job descriptions
 all_job_descriptions = []
 # ─── put these near the top, BEFORE extract_job_entries ─────────────────
@@ -49,7 +45,6 @@ def index():
         "features": [
             "Multi-format resume parsing",
             "Proper section separation",
-            "NLP-enhanced extraction",
             "Fixed fallback parsing strategies",
             "Partial result recovery"
         ],
@@ -73,9 +68,10 @@ def health_check():
     return jsonify({
         "service": "ATS AI Analysis Service",
         "status": "running",
-        "version": "3.1.0",
-        "nlp_available": nlp is not None,
-        "fixed_parser": True
+        # TO THIS:
+"version": "4.0.0-deployment-safe", 
+"nlp_available": False,
+"spacy_disabled": True,
     })
 
 # ============= LEGACY ENDPOINTS =============
@@ -828,31 +824,149 @@ def parse_single_date(date_str):
 # ============= ENHANCED PARSING STRATEGIES =============
 
 def parse_with_nlp(resume_text):
-    """Parse resume using NLP models for entity recognition and relationship extraction"""
-    if not nlp:
-        raise Exception("NLP model not available")
-    
+    """Parse resume using advanced regex patterns (spaCy alternative for deployment)"""
     education = []
     work_experience = []
     
-    # Process text with spaCy
-    doc = nlp(resume_text)
+    # Use advanced regex-based parsing instead of spaCy
+    education = extract_education_advanced_regex(resume_text)
+    work_experience = extract_work_experience_advanced_regex(resume_text)
     
-    # Extract education using NLP
-    education_entities = extract_education_nlp(doc, resume_text)
-    education.extend(education_entities)
-    
-    # Extract work experience using NLP
-    work_entities = extract_work_experience_nlp(doc, resume_text)
-    work_experience.extend(work_entities)
-    
-    # Calculate confidence based on entity extraction quality
+    # Calculate confidence based on extraction quality
     confidence = min(0.95, 0.6 + (len(education) * 0.1) + (len(work_experience) * 0.05))
     
     return education, work_experience, confidence
 
+def extract_education_advanced_regex(resume_text):
+    """Advanced education extraction using regex (replaces spaCy NER)"""
+    education = []
+    
+    # Split text into sections
+    sections = split_into_sections(resume_text)
+    edu_section = find_section(sections, ['education', 'academic', 'qualification'])
+    
+    if not edu_section:
+        edu_section = resume_text  # Fallback to full text
+    
+    # Advanced institution patterns
+    institution_patterns = [
+        r'([A-Z][a-zA-Z\s]*(?:University|College|Institute|School|Polytechnic)[^,\n]*)',
+        r'(Seneca\s+Polytechnic)',
+        r'(University\s+of\s+[A-Za-z\s]+)',
+        r'([A-Z][a-z]+\s+(?:University|College))'
+    ]
+    
+    # Advanced degree patterns  
+    degree_patterns = [
+        r'(Bachelor\s+of\s+[A-Za-z\s&]+)',
+        r'(Master\s+of\s+[A-Za-z\s&]+)',
+        r'(PhD\s+in\s+[A-Za-z\s&]+)',
+        r'(B\.?[ASE]\.?\s+[A-Za-z\s&]+)',
+        r'(M\.?[ASE]\.?\s+[A-Za-z\s&]+)',
+        r'(Bachelor|Master|PhD|Diploma|Certificate)[A-Za-z\s&]*'
+    ]
+    
+    institutions = []
+    degrees = []
+    
+    for pattern in institution_patterns:
+        matches = re.findall(pattern, edu_section, re.IGNORECASE)
+        institutions.extend([m.strip() for m in matches])
+    
+    for pattern in degree_patterns:
+        matches = re.findall(pattern, edu_section, re.IGNORECASE)
+        degrees.extend([m.strip() for m in matches if len(m.strip()) > 5])
+    
+    # Extract dates
+    dates = extract_dates_from_text(edu_section)
+    
+    # Create education entries
+    max_entries = max(len(institutions), len(degrees), 1)
+    for i in range(max_entries):
+        if i < len(institutions) or i < len(degrees):
+            institution = institutions[i] if i < len(institutions) else (institutions[0] if institutions else "Institution not specified")
+            degree = degrees[i] if i < len(degrees) else (degrees[0] if degrees else "Degree not specified")
+            
+            start_date, end_date = assign_dates_to_entry(dates, i)
+            
+            education.append({
+                "institution": institution,
+                "degree": degree,
+                "field_of_study": extract_field_of_study(degree),
+                "start_date": start_date,
+                "end_date": end_date,
+                "current": end_date is None,
+                "description": "",
+                "gpa": "",
+                "activities": ""
+            })
+    
+    return education
+
+def extract_work_experience_advanced_regex(resume_text):
+    """Advanced work experience extraction using regex (replaces spaCy NER)"""
+    work_experience = []
+    
+    # Split text into sections
+    sections = split_into_sections(resume_text)
+    exp_section = find_section(sections, ['experience', 'employment', 'work', 'career', 'professional'])
+    
+    if not exp_section:
+        exp_section = resume_text  # Fallback to full text
+    
+    # Advanced company patterns
+    company_patterns = [
+        r'([A-Z][a-zA-Z\s&]*(?:Technologies|Inc|LLC|Corp|Company|Ltd|Solutions)[^,\n]*)',
+        r'(Google|Microsoft|Amazon|Meta|Apple|IBM|Oracle|Netflix|Uber|Airbnb|Koralbyte)',
+        r'([A-Z][A-Za-z\s&]{3,40}(?:\s+(?:Technologies|Inc|LLC|Corp|Company|Ltd)))'
+    ]
+    
+    # Advanced job title patterns
+    job_title_patterns = [
+        r'((?:Senior|Junior|Lead)\s+[A-Za-z\s]+(?:Engineer|Developer|Manager|Analyst))',
+        r'(Software\s+(?:Engineer|Developer)|Full\s+Stack\s+Developer|Product\s+Manager)',
+        r'([A-Z][A-Za-z\s]+(?:Engineer|Developer|Manager|Analyst|Director|Lead|Consultant))'
+    ]
+    
+    companies = []
+    job_titles = []
+    
+    for pattern in company_patterns:
+        matches = re.findall(pattern, exp_section, re.IGNORECASE)
+        companies.extend([m.strip() for m in matches])
+    
+    for pattern in job_title_patterns:
+        matches = re.findall(pattern, exp_section, re.IGNORECASE)
+        job_titles.extend([m.strip() for m in matches if len(m.strip()) < 50])
+    
+    # Extract dates
+    dates = extract_dates_from_text(exp_section)
+    
+    # Create work experience entries
+    max_entries = max(len(companies), len(job_titles), 1)
+    for i in range(max_entries):
+        if i < len(companies) or i < len(job_titles):
+            company = companies[i] if i < len(companies) else (companies[0] if companies else "Company not specified")
+            position = job_titles[i] if i < len(job_titles) else (job_titles[0] if job_titles else "Position not specified")
+            
+            start_date, end_date = assign_dates_to_entry(dates, i)
+            
+            work_experience.append({
+                "company": company,
+                "position": position,
+                "location": "",
+                "start_date": start_date,
+                "end_date": end_date,
+                "current": end_date is None or "present" in str(end_date).lower(),
+                "description": "",
+                "skills": [],
+                "employment_type": "Full-time"
+            })
+    
+    return work_experience
+
 def extract_education_nlp(doc, text):
-    """Extract education using NLP entity recognition"""
+    """Extract education using advanced regex patterns (spaCy replacement)"""
     education = []
     
     # Split text into sections
@@ -860,16 +974,22 @@ def extract_education_nlp(doc, text):
     edu_section = find_section(sections, ['education', 'academic', 'qualification'])
     
     if edu_section:
-        # Extract from education section
-        edu_doc = nlp(edu_section)
-        
-        # Find institutions
+        # Find institutions using regex patterns (replaces spaCy NER)
         institutions = []
-        for ent in edu_doc.ents:
-            if ent.label_ == "ORG" and any(keyword in ent.text.lower() for keyword in ['university', 'college', 'institute', 'school']):
-                institutions.append(ent.text)
+        institution_patterns = [
+            r'([A-Z][a-zA-Z\s]*(?:University|College|Institute|School|Polytechnic)[^,\n]*)',
+            r'(Seneca\s+Polytechnic)',
+            r'(University\s+of\s+[A-Za-z\s]+)',
+            r'([A-Z][a-z]+\s+(?:University|College))'
+        ]
         
-        # Find degrees
+        for pattern in institution_patterns:
+            matches = re.findall(pattern, edu_section, re.IGNORECASE)
+            for match in matches:
+                if any(keyword in match.lower() for keyword in ['university', 'college', 'institute', 'school', 'polytechnic']):
+                    institutions.append(match.strip())
+        
+        # Find degrees (keep existing regex patterns)
         degrees = []
         degree_patterns = [
             r'(?:Bachelor|Master|PhD|B\.?[SA]\.?|M\.?[SA]\.?|MBA|Doctorate)\s+(?:of\s+|in\s+)?([A-Za-z\s]+)',
@@ -908,7 +1028,7 @@ def extract_education_nlp(doc, text):
     return education
 
 def extract_work_experience_nlp(doc, text):
-    """Extract work experience using NLP entity recognition"""
+    """Extract work experience using advanced regex patterns (spaCy replacement)"""
     work_experience = []
     
     # Split text into sections
@@ -916,15 +1036,20 @@ def extract_work_experience_nlp(doc, text):
     exp_section = find_section(sections, ['experience', 'employment', 'work', 'career', 'professional'])
     
     if exp_section:
-        exp_doc = nlp(exp_section)
-        
-        # Extract companies (organizations)
+        # Extract companies using regex patterns (replaces spaCy NER for ORG entities)
         companies = []
-        for ent in exp_doc.ents:
-            if ent.label_ == "ORG":
-                companies.append(ent.text)
+        company_patterns = [
+            r'([A-Z][a-zA-Z\s&]*(?:Technologies|Inc|LLC|Corp|Company|Ltd|Solutions)[^,\n]*)',
+            r'(Google|Microsoft|Amazon|Meta|Apple|IBM|Oracle|Netflix|Uber|Airbnb|Koralbyte)',
+            r'([A-Z][A-Za-z\s&]{3,40}(?:\s+(?:Technologies|Inc|LLC|Corp|Company|Ltd)))',
+            r'(?:at|@)\s+([A-Z][A-Za-z\s&]+)'
+        ]
         
-        # Extract job titles using patterns
+        for pattern in company_patterns:
+            matches = re.findall(pattern, exp_section, re.IGNORECASE)
+            companies.extend([match.strip() for match in matches])
+        
+        # Extract job titles using patterns (keep existing logic)
         job_titles = []
         title_patterns = [
             r'(?:^|\n)\s*([A-Z][A-Za-z\s&]+(?:Engineer|Developer|Manager|Analyst|Consultant|Director|Lead|Senior|Junior))',
